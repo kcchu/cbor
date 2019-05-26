@@ -132,6 +132,8 @@ where
 
 /// Options for a CBOR serializer.
 ///
+/// When struct_as_array true, structs are encoded as array with no field names.
+///
 /// The `enum_as_map` option determines how enums are encoded.
 ///
 /// This makes no difference when encoding and decoding enums using
@@ -173,6 +175,8 @@ pub struct SerializerOptions {
     /// When set, struct fields and enum variants are identified by their numeric indices rather than names
     /// to save space.
     pub packed: bool,
+    /// When set, struct fields are encoded as array with no field names
+    pub struct_as_array: bool,
     /// When set, enums are encoded as maps rather than arrays.
     pub enum_as_map: bool,
     /// When set, `to_vec` will prepend the CBOR self-describe tag.
@@ -192,6 +196,7 @@ pub struct Serializer<W> {
     writer: W,
     packed: bool,
     enum_as_map: bool,
+    struct_as_array: bool,
 }
 
 impl<W> Serializer<W>
@@ -206,6 +211,7 @@ where
         Serializer {
             writer: writer,
             packed: false,
+            struct_as_array: false,
             enum_as_map: false,
         }
     }
@@ -219,6 +225,7 @@ where
         Serializer {
             writer,
             packed: true,
+            struct_as_array: false,
             enum_as_map: false,
         }
     }
@@ -229,6 +236,7 @@ where
         Serializer {
             writer,
             packed: options.packed,
+            struct_as_array: options.struct_as_array,
             enum_as_map: options.enum_as_map,
         }
     }
@@ -239,6 +247,7 @@ where
         let mut s = Serializer {
             writer: buf,
             packed: self.packed,
+            struct_as_array: self.struct_as_array,
             enum_as_map: self.enum_as_map,
         };
         v.serialize(&mut s)?;
@@ -250,6 +259,7 @@ where
         let mut s = Serializer {
             writer: &mut self.writer,
             packed: self.packed,
+            struct_as_array: self.struct_as_array,
             enum_as_map: self.enum_as_map,
         };
         v.serialize(&mut s)?;
@@ -668,7 +678,11 @@ where
 
     #[inline]
     fn serialize_struct(self, _name: &'static str, len: usize) -> Result<StructSerializer<'a, W>> {
-        self.write_u64(5, len as u64)?;
+        if self.struct_as_array {
+            self.write_u64(4, len as u64)?;
+        } else {
+            self.write_u64(5, len as u64)?;
+        }
         Ok(StructSerializer {
             ser: self,
             idx: 0,
@@ -788,14 +802,21 @@ where
     where
         T: ?Sized + ser::Serialize,
     {
-        let key_bytes = if self.ser.packed {
-            self.ser.serialize_with_same_settings(self.idx)?
+        let value_bytes = self.ser.serialize_with_same_settings(value)?;
+        if self.ser.struct_as_array {
+            self.ser
+                .writer
+                .write_all(&value_bytes)
+                .map_err(|e| e.into())?;
         } else {
-            self.ser.serialize_with_same_settings(key)?
-        };
+            let key_bytes = if self.ser.packed {
+                self.ser.serialize_with_same_settings(self.idx)?
+            } else {
+                self.ser.serialize_with_same_settings(key)?
+            };
+            self.entries.push((key_bytes, value_bytes));
+        }
         self.idx += 1;
-        self.entries
-            .push((key_bytes, self.ser.serialize_with_same_settings(value)?));
         Ok(())
     }
 
@@ -807,10 +828,12 @@ where
 
     #[inline]
     fn end_inner(mut self) -> Result<()> {
-        self.entries.sort_by(|a, b| a.0.cmp(&b.0));
-        for (k, v) in self.entries {
-            self.ser.writer.write_all(&k).map_err(|e| e.into())?;
-            self.ser.writer.write_all(&v).map_err(|e| e.into())?;
+        if !self.ser.struct_as_array {
+            self.entries.sort_by(|a, b| a.0.cmp(&b.0));
+            for (k, v) in self.entries {
+                self.ser.writer.write_all(&k).map_err(|e| e.into())?;
+                self.ser.writer.write_all(&v).map_err(|e| e.into())?;
+            }
         }
         Ok(())
     }
@@ -828,10 +851,12 @@ where
     where
         T: ?Sized + ser::Serialize,
     {
-        if self.ser.packed {
-            self.ser.serialize_with_same_settings(self.idx)?;
-        } else {
-            self.ser.serialize_with_same_settings(key)?;
+        if !self.ser.struct_as_array {
+            if self.ser.packed {
+                self.ser.serialize_with_same_settings(self.idx)?;
+            } else {
+                self.ser.serialize_with_same_settings(key)?;
+            }
         }
         self.ser.serialize_with_same_settings(value)?;
         self.idx += 1;

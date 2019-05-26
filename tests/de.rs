@@ -139,6 +139,19 @@ mod std_tests {
     }
 
     #[test]
+    fn test_struct_as_array() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Foo {
+            a: u64,
+            b: u64,
+            c: u64,
+        }
+        let expected = Foo { a: 1, b: 2, c: 3 };
+        let actual: error::Result<Foo> = de::from_slice(b"\x83\x01\x02\x03");
+        assert_eq!(actual.unwrap(), expected);
+    }
+
+    #[test]
     fn test_object() {
         let value: error::Result<Value> = de::from_slice(b"\xa5aaaAabaBacaCadaDaeaE");
         let mut object = BTreeMap::new();

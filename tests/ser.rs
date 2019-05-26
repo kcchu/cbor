@@ -1,5 +1,8 @@
+#[macro_use]
+extern crate serde_derive;
+
 use serde::Serialize;
-use serde_cbor::ser::{Serializer, SliceWrite};
+use serde_cbor::ser::{Serializer, SerializerOptions, SliceWrite};
 
 #[test]
 fn test_str() {
@@ -28,6 +31,24 @@ fn test_integer() {
     serialize_and_compare(-23567997, b"\x3a\x01\x67\x9e\x7c");
     // u64
     serialize_and_compare(::core::u64::MAX, b"\x1b\xff\xff\xff\xff\xff\xff\xff\xff");
+}
+
+#[test]
+fn test_struct_as_array() {
+    #[derive(Debug, Serialize)]
+    struct Foo {
+        a: u64,
+        b: u64,
+        c: u64,
+    }
+    let object = Foo { a: 1, b: 2, c: 3 };
+    let opt = SerializerOptions {
+        struct_as_array: true,
+        ..Default::default()
+    };
+    let actual = opt.to_vec(&object).unwrap();
+    let expected = b"\x83\x01\x02\x03";
+    assert_eq!(actual, expected);
 }
 
 fn serialize_and_compare<T: Serialize>(value: T, expected: &[u8]) {

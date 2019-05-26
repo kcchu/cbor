@@ -3,7 +3,7 @@ extern crate serde_derive;
 
 use serde::Serialize;
 use serde_cbor::ser::SliceWrite;
-use serde_cbor::{self, Serializer};
+use serde_cbor::{self, ser, Serializer};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Example {
@@ -49,6 +49,24 @@ fn test() {
     let mut slice = [0u8; 64];
     let writer = SliceWrite::new(&mut slice);
     let mut serializer = Serializer::packed(writer);
+    EXAMPLE.serialize(&mut serializer).unwrap();
+    let writer = serializer.into_inner();
+    let end = writer.bytes_written();
+    let slice = writer.into_inner();
+    let deserialized: Example =
+        serde_cbor::from_slice_with_scratch(&slice[..end], &mut []).unwrap();
+    assert_eq!(EXAMPLE, deserialized);
+}
+
+#[test]
+fn test_struct_as_array() {
+    let mut slice = [0u8; 64];
+    let writer = SliceWrite::new(&mut slice);
+    let opts = ser::SerializerOptions {
+        struct_as_array: true,
+        ..Default::default()
+    };
+    let mut serializer = Serializer::new_with_options(writer, &opts);
     EXAMPLE.serialize(&mut serializer).unwrap();
     let writer = serializer.into_inner();
     let end = writer.bytes_written();
